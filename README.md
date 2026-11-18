@@ -1,5 +1,5 @@
 # Now Playing
-A simple menu bar app that shows what's playing on your Mac. 
+A simple, low-overhead menu bar app that shows what's playing on your Mac. 
 
 ![Screenshot of desktop with the menu bar](./docs/screenshot-desktop.png)
 ![Screenshot of menu bar app](./docs/screenshot.png)
@@ -24,3 +24,7 @@ Born out of frustration with the Mac's default "Now Playing" app which hides wha
 **Why there's a helper:** a direct call to the MediaRemote system API returns `nil` for normal apps on this macOS, so the Swift app can't call it. The app runs [`/usr/bin/perl`](/usr/bin/perl) and loads `helper.dylib` into it. Apple signs Perl, so the call goes through. 
 
 **Cost of polling:** each poll starts a new perl process. That's fine at a 2 second interval, but it isn't free.
+
+**Performance:** Since the menu bar is native Swift, it uses very little memory (~26Mb) during use. 
+
+![Memory usage of Now Playing](./docs/screenshot-performance.png)
