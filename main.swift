@@ -10,14 +10,12 @@ let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength
 let btnW: CGFloat = 22
 // Icons are only drawn. The status button receives every click (see Actions.clicked).
 class IconView: NSButton { override func hitTest(_ p: NSPoint) -> NSView? { nil } }
-class LabelView: NSTextField { override func hitTest(_ p: NSPoint) -> NSView? { nil } }
-class ArtView: NSImageView { override func hitTest(_ p: NSPoint) -> NSView? { nil } }
+class LabelView: NSImageView { override func hitTest(_ p: NSPoint) -> NSView? { nil } }
 let playButton = IconView()
 let skipButton = IconView()
-let label = LabelView(labelWithString: "")
-let artView = ArtView()
+let label = LabelView()
+var lastArt: NSImage?
 let pad: CGFloat = 8
-let placeholder = NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)
 
 // MediaRemote command ids
 let cmdPlay = 0, cmdPause = 1, cmdNext = 4, cmdPrev = 5
@@ -75,20 +73,35 @@ func update() {
             let show = r != nil
             for v in [playButton, skipButton, label] as [NSView] { v.isHidden = !show }
             // the art slot is always reserved so the width does not jump when the art arrives late
-            artView.isHidden = !show
-            if let r { artView.image = r.art ?? artView.image ?? placeholder }
-            guard let r else { item.length = NSStatusItem.variableLength; return }
-            label.stringValue = r.text
-            label.sizeToFit()
+            if let art = r?.art { lastArt = art }
+            guard let r else { item.button?.image = nil; item.length = NSStatusItem.variableLength; return }
+            // Text is drawn as a template image so the system dims it like the icons
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.menuBarFont(ofSize: 0), .foregroundColor: NSColor.black]
+            let size = (r.text as NSString).size(withAttributes: attrs)
+            let img = NSImage(size: NSSize(width: ceil(size.width), height: ceil(size.height)), flipped: false) { _ in
+                (r.text as NSString).draw(at: .zero, withAttributes: attrs)
+                return true
+            }
+            img.isTemplate = true
+            label.image = img
+            label.frame.size = img.size
             // layout: pad, art, gap, label, gap, play, skip, pad
             var x = pad
-            artView.frame = NSRect(x: x, y: 2, width: 18, height: 18)
             x += 22
             label.frame.origin = NSPoint(x: x, y: (22 - label.frame.height) / 2)
             x += ceil(label.frame.width) + 6
             playButton.frame.origin.x = x
             skipButton.frame.origin.x = x + btnW
             item.length = x + 2 * btnW + pad
+            // The art is the button's own image (full width, art drawn at the left) so the system
+            // dims it with the rest of the item. Subviews are not dimmed.
+            let art = lastArt
+            item.button?.image = NSImage(size: NSSize(width: item.length, height: 22), flipped: false) { _ in
+                let rect = NSRect(x: pad, y: 2, width: 18, height: 18)
+                NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).addClip()
+                if let art { art.draw(in: rect) } else { NSColor.gray.withAlphaComponent(0.5).setFill(); rect.fill() }
+                return true
+            }
         }
     }
 }
@@ -135,13 +148,9 @@ for (b, name) in [(playButton, "play.fill"), (skipButton, "forward.fill")] {
     b.isHidden = true
     item.button!.addSubview(b)
 }
-label.font = .menuBarFont(ofSize: 0)
 label.isHidden = true
-artView.imageScaling = .scaleProportionallyUpOrDown
-artView.wantsLayer = true
-artView.layer?.cornerRadius = 3
-artView.layer?.masksToBounds = true
-item.button!.addSubview(artView)
+item.button?.imagePosition = .imageOnly
+item.button?.imageScaling = .scaleNone
 item.button!.addSubview(label)
 item.button?.target = actions
 item.button?.action = #selector(Actions.clicked)
