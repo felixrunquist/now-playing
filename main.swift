@@ -17,10 +17,13 @@ let skipButton = IconView()
 let label = LabelView(labelWithString: "")
 let artView = ArtView()
 let pad: CGFloat = 8
+let placeholder = NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)
 
 // MediaRemote command ids
 let cmdPlay = 0, cmdPause = 1, cmdNext = 4, cmdPrev = 5
 var isPlaying = false
+var holdPlayingUntil = Date()  // after a toggle, ignore polled play state while the player catches up
+var generation = 0  // bumped on every command so older, in-flight polls are ignored
 
 // Run the helper inside /usr/bin/perl, which Apple allows to call MediaRemote.
 func runHelper(_ env: [String: String]) -> String {
@@ -62,21 +65,25 @@ func titled(_ sym: String, _ text: String) -> NSAttributedString {
 }
 
 func update() {
+    let gen = generation
     DispatchQueue.global().async {
         let r = fetch()
         DispatchQueue.main.async {
-            isPlaying = r?.playing == true
+            if gen != generation { return }
+            if Date() >= holdPlayingUntil { isPlaying = r?.playing == true }
             playButton.image = symbol(isPlaying ? "pause.fill" : "play.fill")
             let show = r != nil
             for v in [playButton, skipButton, label] as [NSView] { v.isHidden = !show }
-            artView.isHidden = r?.art == nil
-            artView.image = r?.art
+            // the art slot is always reserved so the width does not jump when the art arrives late
+            artView.isHidden = !show
+            if let r { artView.image = r.art ?? artView.image ?? placeholder }
             guard let r else { item.length = NSStatusItem.variableLength; return }
             label.stringValue = r.text
             label.sizeToFit()
             // layout: pad, art, gap, label, gap, play, skip, pad
             var x = pad
-            if r.art != nil { artView.frame = NSRect(x: x, y: 2, width: 18, height: 18); x += 22 }
+            artView.frame = NSRect(x: x, y: 2, width: 18, height: 18)
+            x += 22
             label.frame.origin = NSPoint(x: x, y: (22 - label.frame.height) / 2)
             x += ceil(label.frame.width) + 6
             playButton.frame.origin.x = x
@@ -87,14 +94,26 @@ func update() {
 }
 
 func send(_ cmd: Int) {
+    generation += 1
     DispatchQueue.global().async {
         _ = runHelper(["NP_CMD": String(cmd)])
-        update()
+        DispatchQueue.main.async {
+            update()
+            // track info can lag behind a skip, so check once more
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { update() }
+        }
     }
 }
 
 class Actions: NSObject {
-    @objc func toggle() { send(isPlaying ? cmdPause : cmdPlay) }
+    @objc func toggle() {
+        // flip the icon right away, the poll confirms it later
+        let cmd = isPlaying ? cmdPause : cmdPlay
+        isPlaying.toggle()
+        holdPlayingUntil = Date().addingTimeInterval(2)
+        playButton.image = symbol(isPlaying ? "pause.fill" : "play.fill")
+        send(cmd)
+    }
     @objc func next() { send(cmdNext) }
     @objc func prev() { send(cmdPrev) }
     // Route by cursor position: right-most icon skips, next one toggles, the rest opens the menu.
