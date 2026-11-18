@@ -1,5 +1,9 @@
 import AppKit
 
+// Must come first: older macOS aborts if a status item is created before the app is initialized.
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+
 let maxLen = 40
 let helper = Bundle.main.path(forResource: "helper", ofType: "dylib")!
 let artPath = NSTemporaryDirectory() + "nowplaying-art"
@@ -163,7 +167,6 @@ menu.addItem(.separator())
 let quit = menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 quit.attributedTitle = titled("xmark", "Quit")
 
-NSApplication.shared.setActivationPolicy(.accessory)
 Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in update() }
 update()
-NSApplication.shared.run()
+app.run()
