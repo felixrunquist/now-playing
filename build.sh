@@ -4,8 +4,8 @@ cd "$(dirname "$0")"
 APP=NowPlaying.app
 rm -rf $APP
 mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
-swiftc -O main.swift -o $APP/Contents/MacOS/NowPlaying
-clang -shared helper.c -o $APP/Contents/Resources/helper.dylib -F/System/Library/PrivateFrameworks -framework MediaRemote -framework CoreFoundation
+swiftc -O -target "$(uname -m)-apple-macos13.0" main.swift -o $APP/Contents/MacOS/NowPlaying
+clang -shared -mmacosx-version-min=13.0 helper.c -o $APP/Contents/Resources/helper.dylib -F/System/Library/PrivateFrameworks -framework MediaRemote -framework CoreFoundation
 cat > $APP/Contents/Info.plist <<P
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
