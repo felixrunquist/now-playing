@@ -19,6 +19,8 @@ let playButton = IconView()
 let skipButton = IconView()
 let label = LabelView()
 var lastArt: NSImage?
+var last: (text: String, playing: Bool, art: NSImage?)?
+var collapsed = UserDefaults.standard.bool(forKey: "collapsed")
 let pad: CGFloat = 8
 
 // MediaRemote command ids
@@ -66,6 +68,45 @@ func titled(_ sym: String, _ text: String) -> NSAttributedString {
     return out
 }
 
+func layout() {
+    let show = last != nil
+    playButton.isHidden = !show
+    skipButton.isHidden = !show
+    label.isHidden = !show || collapsed
+    guard let r = last else { item.button?.image = nil; item.length = NSStatusItem.variableLength; return }
+    // Text is drawn as a template image so the system dims it like the icons
+    let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.menuBarFont(ofSize: 0), .foregroundColor: NSColor.black]
+    let size = (r.text as NSString).size(withAttributes: attrs)
+    let img = NSImage(size: NSSize(width: ceil(size.width), height: ceil(size.height)), flipped: false) { _ in
+        (r.text as NSString).draw(at: .zero, withAttributes: attrs)
+        return true
+    }
+    img.isTemplate = true
+    label.image = img
+    label.frame.size = img.size
+    // layout: pad, art, gap, label, gap, play, skip, pad
+    var x = pad
+    x += 22
+    label.frame.origin = NSPoint(x: x, y: (22 - label.frame.height) / 2)
+    if !collapsed { x += ceil(label.frame.width) + 6 }
+    playButton.frame.origin.x = x
+    skipButton.frame.origin.x = x + btnW
+    item.length = x + 2 * btnW + pad
+    // The art is the button's own image (full width, art drawn at the left) so the system
+    // dims it with the rest of the item. Subviews are not dimmed.
+    let art = lastArt
+    item.button?.image = NSImage(size: NSSize(width: item.length, height: 22), flipped: false) { _ in
+        let rect = NSRect(x: pad, y: 2, width: 18, height: 18)
+        NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).addClip()
+        if let art { art.draw(in: rect) } else { NSColor.gray.withAlphaComponent(0.5).setFill(); rect.fill() }
+        return true
+    }
+}
+
+func collapseTitle() -> NSAttributedString {
+    collapsed ? titled("arrow.up.left.and.arrow.down.right", "Expand") : titled("arrow.down.right.and.arrow.up.left", "Collapse")
+}
+
 func update() {
     let gen = generation
     DispatchQueue.global().async {
@@ -74,38 +115,9 @@ func update() {
             if gen != generation { return }
             if Date() >= holdPlayingUntil { isPlaying = r?.playing == true }
             playButton.image = symbol(isPlaying ? "pause.fill" : "play.fill")
-            let show = r != nil
-            for v in [playButton, skipButton, label] as [NSView] { v.isHidden = !show }
-            // the art slot is always reserved so the width does not jump when the art arrives late
+            last = r
             if let art = r?.art { lastArt = art }
-            guard let r else { item.button?.image = nil; item.length = NSStatusItem.variableLength; return }
-            // Text is drawn as a template image so the system dims it like the icons
-            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.menuBarFont(ofSize: 0), .foregroundColor: NSColor.black]
-            let size = (r.text as NSString).size(withAttributes: attrs)
-            let img = NSImage(size: NSSize(width: ceil(size.width), height: ceil(size.height)), flipped: false) { _ in
-                (r.text as NSString).draw(at: .zero, withAttributes: attrs)
-                return true
-            }
-            img.isTemplate = true
-            label.image = img
-            label.frame.size = img.size
-            // layout: pad, art, gap, label, gap, play, skip, pad
-            var x = pad
-            x += 22
-            label.frame.origin = NSPoint(x: x, y: (22 - label.frame.height) / 2)
-            x += ceil(label.frame.width) + 6
-            playButton.frame.origin.x = x
-            skipButton.frame.origin.x = x + btnW
-            item.length = x + 2 * btnW + pad
-            // The art is the button's own image (full width, art drawn at the left) so the system
-            // dims it with the rest of the item. Subviews are not dimmed.
-            let art = lastArt
-            item.button?.image = NSImage(size: NSSize(width: item.length, height: 22), flipped: false) { _ in
-                let rect = NSRect(x: pad, y: 2, width: 18, height: 18)
-                NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).addClip()
-                if let art { art.draw(in: rect) } else { NSColor.gray.withAlphaComponent(0.5).setFill(); rect.fill() }
-                return true
-            }
+            layout()
         }
     }
 }
@@ -133,11 +145,17 @@ class Actions: NSObject {
     }
     @objc func next() { send(cmdNext) }
     @objc func prev() { send(cmdPrev) }
+    @objc func collapse() {
+        collapsed.toggle()
+        UserDefaults.standard.set(collapsed, forKey: "collapsed")
+        collapseMenuItem.attributedTitle = collapseTitle()
+        layout()
+    }
     // Route by cursor position: right-most icon skips, next one toggles, the rest opens the menu.
     @objc func clicked() {
         let b = item.button!
         let x = b.convert(b.window!.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil).x
-        if !playButton.isHidden && x >= skipButton.frame.minX { next() }
+        if !skipButton.isHidden && x >= skipButton.frame.minX { next() }
         else if !playButton.isHidden && x >= playButton.frame.minX { toggle() }
         else { menu.popUp(positioning: nil, at: NSPoint(x: 0, y: b.bounds.height + 5), in: b) }
     }
@@ -163,6 +181,9 @@ let menu = NSMenu()
 let prevMenuItem = menu.addItem(withTitle: "Previous", action: #selector(Actions.prev), keyEquivalent: "")
 prevMenuItem.target = actions
 prevMenuItem.attributedTitle = titled("backward.fill", "Previous")
+let collapseMenuItem = menu.addItem(withTitle: "", action: #selector(Actions.collapse), keyEquivalent: "")
+collapseMenuItem.target = actions
+collapseMenuItem.attributedTitle = collapseTitle()
 menu.addItem(.separator())
 let quit = menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 quit.attributedTitle = titled("xmark", "Quit")
